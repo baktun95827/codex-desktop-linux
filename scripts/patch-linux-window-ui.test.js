@@ -7,6 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  applyKeybindsSettingsIndexPatch,
   applyLinuxComputerUsePluginGatePatch,
   applyLinuxFileManagerPatch,
   applyLinuxMenuPatch,
@@ -59,6 +60,17 @@ function computerUseGateBundleFixture() {
   return [
     "var Qt=`openai-bundled`,$t=`browser-use`,en=`chrome-internal`,tn=`computer-use`,nn=`latex-tectonic`;",
     "var $n=[{forceReload:!0,installWhenMissing:!0,name:$t,isEnabled:({features:e})=>e.browserAgentAvailable,migrate:cn},{name:en,isEnabled:({buildFlavor:e})=>rn(e)},{name:tn,isEnabled:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:wn},{name:nn,isEnabled:()=>!0}];",
+  ].join("");
+}
+
+function keybindsIndexBundleFixture() {
+  return [
+    "var i_e={\"general-settings\":(0,Z.lazy)(()=>s(()=>import(`./general-settings-DsLl9t6Z.js`),[],import.meta.url)),appearance:(0,Z.lazy)(()=>s(()=>import(`./appearance.js`),[],import.meta.url))};",
+    "Kge={\"general-settings\":xh,appearance:Pf,\"git-settings\":t1};",
+    "qge=[`general-settings`,`appearance`,`connections`,`git-settings`,`usage`];",
+    "Jge=[{key:`app`,heading:H7.appHeading,slugs:[`general-settings`,`appearance`,`connections`,`git-settings`,`usage`]}];",
+    "switch(e){case`appearance`:case`git-settings`:case`worktrees`:case`local-environments`:case`data-controls`:case`environments`:return l===`electron`;}",
+    "switch(e){case`usage`:k=g;break bb0;case`appearance`:case`general-settings`:case`agent`:case`git-settings`:case`account`:case`data-controls`:case`personalization`:k=!1;break bb0;}",
   ].join("");
 }
 
@@ -167,6 +179,21 @@ test("allows bundled Computer Use on Linux as well as macOS", () => {
     /\{installWhenMissing:!0,name:tn,isEnabled:\(\{features:e,platform:t\}\)=>\(t===`darwin`\|\|t===`linux`\)&&e\.computerUse/,
   );
   assert.doesNotMatch(patched, /t===`darwin`&&e\.computerUse/);
+});
+
+test("adds Keybinds settings route after upstream minified variable drift", () => {
+  const patched = applyPatchTwice(applyKeybindsSettingsIndexPatch, keybindsIndexBundleFixture());
+
+  assert.match(
+    patched,
+    /var i_e=\{keybinds:\(0,Z\.lazy\)\(\(\)=>s\(\(\)=>import\(`\.\/keybinds-settings-linux\.js`\)/,
+  );
+  assert.match(patched, /Kge=\{keybinds:xh,"general-settings":xh,/);
+  assert.match(patched, /qge=\[`general-settings`,`keybinds`,`appearance`/);
+  assert.match(patched, /slugs:\[`general-settings`,`keybinds`,`appearance`/);
+  assert.match(patched, /case`keybinds`:return l===`electron`/);
+  assert.match(patched, /case`keybinds`:k=!1;break bb0;/);
+  assert.match(patched, /codexLinuxKeybindOverridesRuntime/);
 });
 
 test("adds installWhenMissing to an already Linux-enabled Computer Use gate", () => {
