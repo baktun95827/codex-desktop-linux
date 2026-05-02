@@ -111,6 +111,69 @@ install_linux_executable_resource() {
     install -m 0755 "$source" "$destination"
 }
 
+install_browser_use_node_repl_candidate() {
+    local source="$1"
+    local destination="$2"
+    local label="$3"
+    local warn_missing="${4:-1}"
+
+    [ -n "$source" ] || return 1
+
+    if [ ! -f "$source" ]; then
+        if [ "$warn_missing" = "1" ]; then
+            warn "Browser Use $label not found at $source; skipping"
+        fi
+        return 1
+    fi
+
+    if [ "$(basename "$source")" = "node" ]; then
+        warn "Browser Use $label points at a plain Node.js binary, not node_repl; skipping"
+        return 1
+    fi
+
+    if ! is_elf_executable "$source"; then
+        warn "Browser Use $label is not a Linux executable; skipping"
+        return 1
+    fi
+
+    if [ "$source" = "$destination" ]; then
+        chmod 0755 "$destination"
+    else
+        install -m 0755 "$source" "$destination"
+    fi
+    info "Browser Use node_repl runtime installed from $label"
+}
+
+install_browser_use_node_repl_resource() {
+    local upstream_source="$1"
+    local destination="$2"
+    local source
+
+    for source in \
+        "${CODEX_LINUX_NODE_REPL_SOURCE:-}" \
+        "${CODEX_NODE_REPL_PATH:-}"
+    do
+        [ -n "$source" ] || continue
+        if install_browser_use_node_repl_candidate "$source" "$destination" "$source" 1; then
+            return 0
+        fi
+    done
+
+    for source in \
+        "/opt/$CODEX_APP_ID/resources/node_repl" \
+        "/opt/codex-desktop/resources/node_repl" \
+        "$upstream_source"
+    do
+        [ -n "$source" ] || continue
+        if install_browser_use_node_repl_candidate "$source" "$destination" "$source" 0; then
+            return 0
+        fi
+    done
+
+    warn "Browser Use node_repl runtime not installed; provide a Linux ELF with CODEX_LINUX_NODE_REPL_SOURCE=/path/to/node_repl"
+    return 1
+}
+
 remove_macos_sidecar_files() {
     local root="$1"
     find "$root" -type f -name '*:com.apple.*' -delete
@@ -203,8 +266,7 @@ install_bundled_plugin_resources() {
     write_bundled_plugins_marketplace "$source_marketplace" "$bundled_plugins_dir/.agents/plugins/marketplace.json" "$include_browser" "$include_computer_use"
 
     install_linux_executable_resource "$upstream_resources/node" "$resources_dir/node" "node runtime" || true
-    install_linux_executable_resource "$upstream_resources/node_repl" "$resources_dir/node_repl" "node_repl runtime" || true
+    install_browser_use_node_repl_resource "$upstream_resources/node_repl" "$resources_dir/node_repl" || true
 
     info "Linux-safe bundled plugins installed"
 }
-

@@ -70,6 +70,8 @@ Environment variables:
                       (default: https://artifacts.electronjs.org/headers/dist)
   ELECTRON_MIRROR     Override the Electron runtime download mirror root
                       (example: https://npmmirror.com/mirrors/electron/)
+  CODEX_LINUX_NODE_REPL_SOURCE
+                      Path to a Linux ELF node_repl MCP runtime to install for Browser Use
   REBUILD_REPORT_DIR  Default report directory for --inspect and rebuild reports
 
 After install, launch with:
