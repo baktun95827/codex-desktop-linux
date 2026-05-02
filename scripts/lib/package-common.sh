@@ -133,6 +133,7 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/launcher/start.sh.template" "$update_builder_root/launcher/start.sh.template"
     cp "$REPO_DIR/Cargo.toml" "$update_builder_root/Cargo.toml"
     cp "$REPO_DIR/Cargo.lock" "$update_builder_root/Cargo.lock"
+    cp -r "$REPO_DIR/browser-use-node-repl" "$update_builder_root/browser-use-node-repl"
     cp -r "$REPO_DIR/computer-use-linux" "$update_builder_root/computer-use-linux"
     cp -r "$REPO_DIR/updater" "$update_builder_root/updater"
     mkdir -p "$update_builder_root/plugins/openai-bundled/plugins"

@@ -295,6 +295,58 @@ JSON
     assert_not_contains "$output_log" "node_repl runtime not installed"
 }
 
+test_browser_use_node_repl_bundled_runtime() {
+    info "Checking bundled Browser Use node_repl runtime build"
+    local workspace="$TMP_DIR/node-repl-bundled"
+    local bundle_root="$workspace/bundle"
+    local app_dir="$workspace/Codex.app"
+    local upstream_resources="$app_dir/Contents/Resources"
+    local install_dir="$workspace/install"
+    local output_log="$workspace/output.log"
+
+    mkdir -p \
+        "$bundle_root" \
+        "$upstream_resources/plugins/openai-bundled/plugins/browser-use" \
+        "$upstream_resources/plugins/openai-bundled/.agents/plugins" \
+        "$install_dir"
+    cp -R "$REPO_DIR/browser-use-node-repl" "$bundle_root/browser-use-node-repl"
+
+    printf '\177ELFfake-node-runtime' > "$upstream_resources/node"
+    printf 'Mach-O fake node_repl' > "$upstream_resources/node_repl"
+    printf '%s\n' '{"name":"browser-use"}' > "$upstream_resources/plugins/openai-bundled/plugins/browser-use/.codex-plugin.json"
+    cat > "$upstream_resources/plugins/openai-bundled/.agents/plugins/marketplace.json" <<'JSON'
+{
+  "plugins": [
+    {
+      "name": "browser-use",
+      "source": {
+        "source": "local",
+        "path": "./plugins/browser-use"
+      }
+    }
+  ]
+}
+JSON
+
+    (
+        SCRIPT_DIR="$bundle_root"
+        INSTALL_DIR="$install_dir"
+        ICON_SOURCE="$workspace/missing-icon.png"
+        CODEX_APP_ID="codex-desktop"
+        warn() { echo "[WARN] $*" >&2; }
+        # shellcheck disable=SC1091
+        source "$REPO_DIR/scripts/lib/bundled-plugins.sh"
+        stage_linux_computer_use_plugin() { return 1; }
+        install_bundled_plugin_resources "$app_dir"
+    ) >"$output_log" 2>&1
+
+    assert_file_exists "$install_dir/resources/node_repl"
+    assert_file_exists "$install_dir/resources/node_repl.mjs"
+    head -c 4 "$install_dir/resources/node_repl" | grep -q $'^\177ELF' || fail "Expected bundled node_repl to be an ELF executable"
+    assert_contains "$output_log" "Browser Use node_repl runtime installed from bundled Linux node_repl runtime"
+    assert_not_contains "$output_log" "node_repl runtime not installed"
+}
+
 test_missing_input_failure() {
     info "Checking missing-input failure path"
     local workspace="$TMP_DIR/missing"
@@ -1645,6 +1697,7 @@ main() {
     test_deb_builder_respects_package_identity
     test_rpm_builder_smoke
     test_browser_use_node_repl_linux_source_override
+    test_browser_use_node_repl_bundled_runtime
     test_missing_input_failure
     test_make_build_app_uses_installer_download_flow_by_default
     test_upstream_build_app_workflow_tracks_dmg_metadata

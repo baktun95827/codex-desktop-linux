@@ -184,7 +184,7 @@ You need:
 - `python3`, `7z` (or `7zz`), `curl`, `unzip`, `make`, `g++`
 - **Rust toolchain** (`cargo`) for the `codex-update-manager` and `codex-computer-use-linux` crates
 
-Browser Use / `node_repl` currently needs Node.js 22.22.0+ plus a Linux `node_repl` MCP runtime. The launcher exports `NODE_REPL_NODE_PATH` and `CODEX_BROWSER_USE_NODE_PATH` to a compatible Node runtime when it can find one, preferring the bundled primary runtime cache, system Node, and then `nvm` installs. When building from a macOS DMG, provide a trusted Linux `node_repl` binary with `CODEX_LINUX_NODE_REPL_SOURCE=/path/to/node_repl`; the installer rejects the macOS `node_repl` from the DMG and will also refuse a plain `node` binary.
+Browser Use / `node_repl` currently needs Node.js 22.22.0+ plus the bundled Linux `node_repl` MCP runtime. The launcher exports `NODE_REPL_NODE_PATH` and `CODEX_BROWSER_USE_NODE_PATH` to a compatible Node runtime when it can find one, preferring the bundled primary runtime cache, system Node, and then `nvm` installs. When building from a macOS DMG, the installer builds this repo's Linux `node_repl` wrapper instead of using the macOS `node_repl` from the DMG. To test another trusted Linux runtime, override it with `CODEX_LINUX_NODE_REPL_SOURCE=/path/to/node_repl`; the installer rejects a plain `node` binary.
 
 The easiest setup is the bundled bootstrap:
 
@@ -243,7 +243,7 @@ Equivalent direct commands:
 ```bash
 ./install.sh                                # default: download or reuse cached DMG
 ./install.sh /path/to/Codex.dmg             # use a specific DMG
-CODEX_LINUX_NODE_REPL_SOURCE=/path/to/node_repl ./install.sh
+CODEX_LINUX_NODE_REPL_SOURCE=/path/to/node_repl ./install.sh  # optional runtime override
 ./install.sh --fresh                        # remove existing install dir + cached DMG
 ./codex-app/start.sh                        # run after build
 ```

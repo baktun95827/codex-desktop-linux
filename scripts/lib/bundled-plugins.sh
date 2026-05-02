@@ -19,6 +19,50 @@ find_cargo_for_linux_computer_use() {
     return 1
 }
 
+find_cc_for_browser_use_node_repl() {
+    local candidate
+    for candidate in cc gcc clang; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+build_linux_browser_use_node_repl_runtime() {
+    local source_dir="$SCRIPT_DIR/browser-use-node-repl"
+    local wrapper_source="$source_dir/node_repl_wrapper.c"
+    local runtime_source="$source_dir/node_repl.mjs"
+    local build_dir="$SCRIPT_DIR/target/browser-use-node-repl"
+    local wrapper_binary="$build_dir/node_repl"
+    local cc_cmd=""
+
+    if [ ! -f "$wrapper_source" ] || [ ! -f "$runtime_source" ]; then
+        warn "Linux Browser Use node_repl runtime source not found at $source_dir"
+        return 1
+    fi
+
+    if ! cc_cmd="$(find_cc_for_browser_use_node_repl)"; then
+        warn "C compiler not found; Browser Use node_repl runtime will be unavailable"
+        return 1
+    fi
+
+    mkdir -p "$build_dir"
+    info "Building Linux Browser Use node_repl runtime..."
+    if ! "$cc_cmd" -O2 -Wall -Wextra -o "$wrapper_binary" "$wrapper_source" >&2; then
+        warn "Failed to build Linux Browser Use node_repl runtime"
+        return 1
+    fi
+
+    [ -x "$wrapper_binary" ] || {
+        warn "Linux Browser Use node_repl runtime binary missing after build: $wrapper_binary"
+        return 1
+    }
+
+    echo "$wrapper_binary"
+}
+
 build_linux_computer_use_backend() {
     local crate_dir="$SCRIPT_DIR/computer-use-linux"
     local backend_binary="$SCRIPT_DIR/target/release/codex-computer-use-linux"
@@ -148,6 +192,7 @@ install_browser_use_node_repl_resource() {
     local upstream_source="$1"
     local destination="$2"
     local source
+    local bundled_source
 
     for source in \
         "${CODEX_LINUX_NODE_REPL_SOURCE:-}" \
@@ -158,6 +203,13 @@ install_browser_use_node_repl_resource() {
             return 0
         fi
     done
+
+    if bundled_source="$(build_linux_browser_use_node_repl_runtime)"; then
+        if install_browser_use_node_repl_candidate "$bundled_source" "$destination" "bundled Linux node_repl runtime" 1; then
+            install -m 0644 "$SCRIPT_DIR/browser-use-node-repl/node_repl.mjs" "$(dirname "$destination")/node_repl.mjs"
+            return 0
+        fi
+    fi
 
     for source in \
         "/opt/$CODEX_APP_ID/resources/node_repl" \
