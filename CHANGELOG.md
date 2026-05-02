@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - NixOS-installed `start.sh` shebang is patched to a nix-store `bash` so the launcher actually runs on systems without `/bin/bash`.
 - Browser Use packaging can now inject a trusted Linux ELF `node_repl` runtime via `CODEX_LINUX_NODE_REPL_SOURCE`, instead of trying to reuse the macOS `node_repl` from the upstream DMG.
 - Browser Use packaging now builds and installs a bundled Linux `node_repl` MCP runtime so the `js` / `js_reset` tools are available without a separate runtime download.
+- Debian packages now recommend Node.js/npm for bare-system Browser Use installs, and the launcher prints an install hint when Node.js 22.22.0+ is unavailable.
 
 ## [0.6.2] - 2026-05-01
 
