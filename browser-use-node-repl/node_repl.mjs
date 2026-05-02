@@ -107,9 +107,46 @@ function createNodeReplBridge() {
       });
     },
     createElicitation(params) {
-      return sendClientRequest("elicitation/create", params);
+      const localDecision = localBrowserUseElicitationDecision(params);
+      if (localDecision != null) {
+        return localDecision;
+      }
+      return { action: "reject" };
     },
   };
+}
+
+function localBrowserUseElicitationDecision(params) {
+  const origin = params?.meta?.origin;
+  if (typeof origin !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(origin);
+    if (url.protocol === "file:") {
+      return { action: "accept" };
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    ) {
+      return { action: "accept" };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function resetRuntime() {

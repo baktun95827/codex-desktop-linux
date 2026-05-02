@@ -349,6 +349,118 @@ JSON
     assert_not_contains "$output_log" "node_repl runtime not installed"
 }
 
+test_browser_use_node_repl_mcp_runtime() {
+    info "Checking Browser Use node_repl MCP runtime behavior"
+    local runtime="$REPO_DIR/browser-use-node-repl/node_repl.mjs"
+
+    node --check "$runtime"
+    NODE_OPTIONS="--experimental-vm-modules ${NODE_OPTIONS:-}" node - "$runtime" <<'NODE'
+const { spawn } = require("node:child_process");
+
+const runtime = process.argv[2];
+const child = spawn(process.execPath, [runtime], {
+  env: {
+    ...process.env,
+    NODE_OPTIONS: `--experimental-vm-modules ${process.env.NODE_OPTIONS || ""}`.trim(),
+  },
+  stdio: ["pipe", "pipe", "pipe"],
+});
+
+let buffer = Buffer.alloc(0);
+let nextId = 1;
+const pending = new Map();
+
+child.stderr.on("data", (chunk) => {
+  const text = chunk.toString("utf8");
+  if (!text.includes("ExperimentalWarning")) {
+    process.stderr.write(text);
+  }
+});
+
+child.stdout.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  for (;;) {
+    const headerEnd = buffer.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      return;
+    }
+    const header = buffer.subarray(0, headerEnd).toString("utf8");
+    const length = Number(/^Content-Length:\s*(\d+)$/im.exec(header)?.[1]);
+    const bodyStart = headerEnd + 4;
+    const bodyEnd = bodyStart + length;
+    if (!Number.isFinite(length) || buffer.length < bodyEnd) {
+      return;
+    }
+    const message = JSON.parse(buffer.subarray(bodyStart, bodyEnd).toString("utf8"));
+    buffer = buffer.subarray(bodyEnd);
+    const slot = pending.get(message.id);
+    if (slot == null) {
+      continue;
+    }
+    pending.delete(message.id);
+    if (message.error != null) {
+      slot.reject(new Error(message.error.message));
+    } else {
+      slot.resolve(message.result);
+    }
+  }
+});
+
+function send(method, params) {
+  const id = nextId++;
+  const payload = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, method, params }), "utf8");
+  child.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
+  child.stdin.write(payload);
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    setTimeout(() => {
+      if (pending.delete(id)) {
+        reject(new Error(`Timed out waiting for ${method}`));
+      }
+    }, 5000).unref();
+  });
+}
+
+(async () => {
+  const init = await send("initialize", { protocolVersion: "2024-11-05" });
+  if (init.serverInfo?.name !== "node_repl") {
+    throw new Error("unexpected node_repl server name");
+  }
+
+  const tools = await send("tools/list", {});
+  const names = tools.tools.map((tool) => tool.name).sort().join(",");
+  if (names !== "js,js_reset") {
+    throw new Error(`unexpected tools: ${names}`);
+  }
+
+  const result = await send("tools/call", {
+    name: "js",
+    arguments: {
+      code: `
+const local = await globalThis.nodeRepl.createElicitation({ meta: { origin: "http://127.0.0.1:1234" } });
+const external = await globalThis.nodeRepl.createElicitation({ meta: { origin: "https://example.com" } });
+console.log(JSON.stringify({ local, external }));
+`,
+    },
+  });
+  const text = result.content?.[0]?.text ?? "";
+  const parsed = JSON.parse(text);
+  if (parsed.local?.action !== "accept") {
+    throw new Error(`local Browser Use origin was not accepted: ${text}`);
+  }
+  if (parsed.external?.action !== "reject") {
+    throw new Error(`external Browser Use origin was not rejected: ${text}`);
+  }
+
+  child.stdin.end();
+})().catch((error) => {
+  child.kill();
+  console.error(error);
+  process.exit(1);
+});
+NODE
+}
+
 test_missing_input_failure() {
     info "Checking missing-input failure path"
     local workspace="$TMP_DIR/missing"
@@ -1702,6 +1814,7 @@ main() {
     test_rpm_builder_smoke
     test_browser_use_node_repl_linux_source_override
     test_browser_use_node_repl_bundled_runtime
+    test_browser_use_node_repl_mcp_runtime
     test_missing_input_failure
     test_make_build_app_uses_installer_download_flow_by_default
     test_upstream_build_app_workflow_tracks_dmg_metadata
