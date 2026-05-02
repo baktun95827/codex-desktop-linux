@@ -437,20 +437,29 @@ function send(method, params) {
     name: "js",
     arguments: {
       code: `
-const local = await globalThis.nodeRepl.createElicitation({ meta: { origin: "http://127.0.0.1:1234" } });
-const external = await globalThis.nodeRepl.createElicitation({ meta: { origin: "https://example.com" } });
-console.log(JSON.stringify({ local, external }));
-`,
-    },
-  });
+	const local = await globalThis.nodeRepl.createElicitation({ meta: { origin: "http://127.0.0.1:1234" } });
+	const external = await globalThis.nodeRepl.createElicitation({ meta: { origin: "https://example.com" } });
+	let nativePipeRejected = false;
+	try {
+	  await globalThis.nodeRepl.nativePipe.createConnection("/tmp/codex-node-repl-missing.sock");
+	} catch {
+	  nativePipeRejected = true;
+	}
+	console.log(JSON.stringify({ local, external, nativePipeRejected }));
+	`,
+	    },
+	  });
   const text = result.content?.[0]?.text ?? "";
   const parsed = JSON.parse(text);
   if (parsed.local?.action !== "accept") {
     throw new Error(`local Browser Use origin was not accepted: ${text}`);
   }
-  if (parsed.external?.action !== "reject") {
-    throw new Error(`external Browser Use origin was not rejected: ${text}`);
-  }
+	  if (parsed.external?.action !== "reject") {
+	    throw new Error(`external Browser Use origin was not rejected: ${text}`);
+	  }
+	  if (parsed.nativePipeRejected !== true) {
+	    throw new Error(`missing native pipe did not reject cleanly: ${text}`);
+	  }
 
   child.stdin.end();
 })().catch((error) => {

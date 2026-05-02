@@ -86,7 +86,21 @@ function createNodeReplBridge() {
     fetch: (...args) => fetch(...args),
     nativePipe: {
       createConnection(pipePath) {
-        return net.createConnection(pipePath);
+        return new Promise((resolve, reject) => {
+          const socket = net.createConnection(pipePath);
+          let settled = false;
+
+          socket.on("error", (error) => {
+            if (!settled) {
+              settled = true;
+              reject(error);
+            }
+          });
+          socket.once("connect", () => {
+            settled = true;
+            resolve(socket);
+          });
+        });
       },
     },
     setResponseMeta(meta) {
