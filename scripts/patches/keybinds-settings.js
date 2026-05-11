@@ -287,6 +287,18 @@ function patchNativeKeyboardShortcutsSettingsAssets(extractedDir) {
     const patches = [
       ...collectRequiredAssetPatches(
         extractedDir,
+        /^electron-menu-shortcuts-.*\.js$/,
+        applyNativeKeyboardShortcutsElectronMenuPatch,
+        "electron menu shortcuts bundle",
+      ),
+      ...collectRequiredAssetPatches(
+        extractedDir,
+        /^keyboard-shortcuts-settings-.*\.js$/,
+        applyNativeKeyboardShortcutsSettingsEditorPatch,
+        "keyboard shortcuts settings bundle",
+      ),
+      ...collectRequiredAssetPatches(
+        extractedDir,
         /^settings-page-.*\.js$/,
         applyNativeKeyboardShortcutsSettingsPagePatch,
         "settings page bundle",
@@ -503,11 +515,13 @@ function applyNativeKeyboardShortcutsSettingsPagePatch(currentSource) {
     .replace(/case`keybinds`:case`general-settings`/g, "case`general-settings`")
     .replace(/case`keybinds`:case`appearance`/g, "case`appearance`");
 
-  const visibilityPattern = /case`keyboard-shortcuts`:return\s*[A-Za-z_$][\w$]*/;
-  if (!visibilityPattern.test(patchedSource)) {
-    throw new Error("Required Keyboard Shortcuts patch failed: could not make keyboard shortcuts visible");
+  if (!patchedSource.includes("case`keyboard-shortcuts`:return!0")) {
+    const visibilityPattern = /case`keyboard-shortcuts`:return\s*[A-Za-z_$][\w$]*/;
+    if (!visibilityPattern.test(patchedSource)) {
+      throw new Error("Required Keyboard Shortcuts patch failed: could not make keyboard shortcuts visible");
+    }
+    patchedSource = patchedSource.replace(visibilityPattern, "case`keyboard-shortcuts`:return!0");
   }
-  patchedSource = patchedSource.replace(visibilityPattern, "case`keyboard-shortcuts`:return!0");
 
   const redirectPattern = /case`keyboard-shortcuts`:\s*([A-Za-z_$][\w$]*)=[^;]+;break\s+([A-Za-z_$][\w$]*);/;
   if (redirectPattern.test(patchedSource)) {
@@ -518,6 +532,47 @@ function applyNativeKeyboardShortcutsSettingsPagePatch(currentSource) {
   }
 
   return patchedSource;
+}
+
+function applyNativeKeyboardShortcutsElectronMenuPatch(currentSource) {
+  let patchedSource = currentSource;
+
+  const terminalDefaultPattern =
+    /(\{id:`toggleTerminal`,[^}]*?electron:\{[^}]*?defaultKeybindings:\[\{key:`)CmdOrCtrl\+J(`\}\]\})/;
+  if (!terminalDefaultPattern.test(patchedSource)) {
+    throw new Error("Required Keyboard Shortcuts patch failed: could not update terminal toggle default");
+  }
+  patchedSource = patchedSource.replace(terminalDefaultPattern, "$1Ctrl+`$2");
+
+  if (patchedSource.includes("codexLinuxLegacyKeybinding")) {
+    return patchedSource;
+  }
+
+  const keymapNeedle =
+    "function _({commandId:e,keymapState:t,isMacOS:n}){let r=s(e);if(r==null||!u(r))return[];let i=t?.bindings.filter(t=>t.command===e);if(i!=null&&i.length>0){let e=[];for(let t of i){if(t.key==null)return[];e.push(t.key)}return e}return g({commandId:e,isMacOS:n})}";
+  const keymapPatch =
+    "function _({commandId:e,keymapState:t,isMacOS:n}){let r=s(e);if(r==null||!u(r))return[];let i=t?.bindings.filter(t=>t.command===e);if(i!=null&&i.length>0){let e=[];for(let t of i){if(t.key==null)return[];e.push(t.key)}return e}let a=codexLinuxLegacyKeybinding(e);return a==null?g({commandId:e,isMacOS:n}):[a]}function codexLinuxLegacyKeybinding(e){try{if(typeof window==`undefined`||!x())return null;let t=JSON.parse(window.localStorage?.getItem(\"codex-linux-keybind-overrides\")||\"{}\");if(t&&typeof t==`object`&&!Array.isArray(t)){let n=t[e];return typeof n==`string`&&n.trim().length>0?n.trim():null}}catch{}return null}";
+  if (!patchedSource.includes(keymapNeedle)) {
+    throw new Error("Required Keyboard Shortcuts patch failed: could not add legacy keybind compatibility");
+  }
+  return patchedSource.replace(keymapNeedle, keymapPatch);
+}
+
+function applyNativeKeyboardShortcutsSettingsEditorPatch(currentSource) {
+  let patchedSource = currentSource;
+
+  if (patchedSource.includes("codexLinuxSyncLegacyShortcut")) {
+    return patchedSource;
+  }
+
+  const helperNeedle =
+    "async function W({commandId:e,intl:t,setCommandKeybinding:n,setErrorByCommandId:r,update:i}){r(t=>({...t,[e]:void 0}));try{await n.mutateAsync({commandId:e,update:i})}catch(n){r(r=>({...r,[e]:n instanceof Error?n.message:t.formatMessage({id:`settings.keyboardShortcuts.updateError`,defaultMessage:`Failed to update shortcut`,description:`Fallback error shown when updating an action shortcut fails`})}))}}";
+  const helperPatch =
+    "function codexLinuxSyncLegacyShortcut(e,t){try{if(typeof window==`undefined`)return;let n=\"codex-linux-keybind-overrides\",r=JSON.parse(window.localStorage?.getItem(n)||\"{}\");(!r||typeof r!=`object`||Array.isArray(r))&&(r={});switch(t?.type){case`set`:case`replace`:case`append`:typeof t.accelerator==`string`&&t.accelerator.trim().length>0?r[e]=t.accelerator.trim():delete r[e];break;case`reset`:case`remove`:delete r[e];break;default:return}window.localStorage?.setItem(n,JSON.stringify(r)),window.dispatchEvent(new CustomEvent(\"codex-linux-keybind-overrides-changed\",{detail:r}))}catch{}}async function W({commandId:e,intl:t,setCommandKeybinding:n,setErrorByCommandId:r,update:i}){r(t=>({...t,[e]:void 0}));try{await n.mutateAsync({commandId:e,update:i}),codexLinuxSyncLegacyShortcut(e,i)}catch(n){r(r=>({...r,[e]:n instanceof Error?n.message:t.formatMessage({id:`settings.keyboardShortcuts.updateError`,defaultMessage:`Failed to update shortcut`,description:`Fallback error shown when updating an action shortcut fails`})}))}}";
+  if (!patchedSource.includes(helperNeedle)) {
+    throw new Error("Required Keyboard Shortcuts patch failed: could not sync legacy shortcut state");
+  }
+  return patchedSource.replace(helperNeedle, helperPatch);
 }
 
 function applyNativeKeyboardShortcutsRouteCleanupPatch(currentSource) {
@@ -619,7 +674,9 @@ function applyKeybindsSettingsIndexPatch(currentSource) {
 module.exports = {
   applyKeybindsSettingsIndexPatch,
   applyKeybindsSettingsPagePatch,
+  applyNativeKeyboardShortcutsElectronMenuPatch,
   applyNativeKeyboardShortcutsRouteCleanupPatch,
+  applyNativeKeyboardShortcutsSettingsEditorPatch,
   applyNativeKeyboardShortcutsSettingsPagePatch,
   applyKeybindsSettingsSectionsPatch,
   applyKeybindsSettingsSharedPatch,

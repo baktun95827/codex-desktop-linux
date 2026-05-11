@@ -769,7 +769,18 @@ test("uses upstream Keyboard Shortcuts settings when they are available", () => 
     fs.writeFileSync(path.join(assetsDir, "settings-content-layout-test.js"), "export{};");
     fs.writeFileSync(path.join(assetsDir, "settings-group-test.js"), "export{};");
     fs.writeFileSync(path.join(assetsDir, "settings-surface-test.js"), "export{};");
-    fs.writeFileSync(path.join(assetsDir, "keyboard-shortcuts-settings-test.js"), "export{};");
+    fs.writeFileSync(
+      path.join(assetsDir, "electron-menu-shortcuts-test.js"),
+      [
+        "var n=[{id:`toggleTerminal`,titleIntlId:`codex.command.toggleTerminal`,descriptionIntlId:`codex.commandDescription.toggleTerminal`,commandMenuGroupKey:`panels`,commandMenu:!0,electron:{menuTitle:`Toggle Terminal`,menuTitleIntlId:`codex.commandMenuTitle.toggleTerminal`,defaultKeybindings:[{key:`CmdOrCtrl+J`}]}}];",
+        "function s(e){return n.find(t=>t.id===e)??null}function u(e){return!0}function g(){return[`CmdOrCtrl+J`]}function x(){return typeof navigator>`u`?!1:(navigator.platform??``).startsWith(`Linux`)}",
+        "function _({commandId:e,keymapState:t,isMacOS:n}){let r=s(e);if(r==null||!u(r))return[];let i=t?.bindings.filter(t=>t.command===e);if(i!=null&&i.length>0){let e=[];for(let t of i){if(t.key==null)return[];e.push(t.key)}return e}return g({commandId:e,isMacOS:n})}",
+      ].join(""),
+    );
+    fs.writeFileSync(
+      path.join(assetsDir, "keyboard-shortcuts-settings-test.js"),
+      "async function W({commandId:e,intl:t,setCommandKeybinding:n,setErrorByCommandId:r,update:i}){r(t=>({...t,[e]:void 0}));try{await n.mutateAsync({commandId:e,update:i})}catch(n){r(r=>({...r,[e]:n instanceof Error?n.message:t.formatMessage({id:`settings.keyboardShortcuts.updateError`,defaultMessage:`Failed to update shortcut`,description:`Fallback error shown when updating an action shortcut fails`})}))}}export{};",
+    );
     fs.writeFileSync(
       path.join(assetsDir, "settings-sections-test.js"),
       "var e=`general-settings`,t=function(e){return e}({}),n=[{slug:`general-settings`},{slug:`account`},{slug:`appearance`},{slug:`keyboard-shortcuts`}];export{n,t as r,e as t};",
@@ -817,6 +828,17 @@ test("uses upstream Keyboard Shortcuts settings when they are available", () => 
     assert.match(settingsPageSource, /case`keyboard-shortcuts`:return!0/);
     assert.match(settingsPageSource, /case`keyboard-shortcuts`:H=!1;break bb0/);
     assert.doesNotMatch(settingsPageSource, /keybinds/);
+    const shortcutsSource = fs.readFileSync(path.join(assetsDir, "electron-menu-shortcuts-test.js"), "utf8");
+    assert.match(shortcutsSource, /defaultKeybindings:\[\{key:`Ctrl\+`/);
+    assert.match(shortcutsSource, /codexLinuxLegacyKeybinding/);
+    assert.match(shortcutsSource, /codex-linux-keybind-overrides/);
+    const keyboardSettingsSource = fs.readFileSync(
+      path.join(assetsDir, "keyboard-shortcuts-settings-test.js"),
+      "utf8",
+    );
+    assert.match(keyboardSettingsSource, /codexLinuxSyncLegacyShortcut/);
+    assert.match(keyboardSettingsSource, /codex-linux-keybind-overrides/);
+    assert.match(keyboardSettingsSource, /case`reset`:case`remove`:delete r\[e\]/);
     assert.equal(fs.existsSync(path.join(assetsDir, "keybinds-settings-linux.js")), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
