@@ -42,6 +42,7 @@ const {
   isComputerUseUiEnabled,
   patchMainBundleSource,
   patchExtractedApp,
+  patchKeybindsSettingsAssets,
   patchPackageJson,
   patchLinuxAppUpdaterBridge,
   createPatchReport,
@@ -742,6 +743,84 @@ test("adds Keybinds settings route after upstream minified variable drift", () =
   assert.match(patched, /case`keybinds`:return l===`electron`/);
   assert.match(patched, /case`keybinds`:k=!1;break bb0;/);
   assert.match(patched, /codexLinuxKeybindOverridesRuntime/);
+});
+
+test("uses upstream Keyboard Shortcuts settings when they are available", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-keybinds-native-shortcuts-"));
+  try {
+    const assetsDir = path.join(tempRoot, "webview", "assets");
+    fs.mkdirSync(assetsDir, { recursive: true });
+    fs.writeFileSync(path.join(assetsDir, "chunk-test.js"), "export{};");
+    fs.writeFileSync(
+      path.join(assetsDir, "jsx-runtime-test.js"),
+      [
+        'import{s as s}from"./chunk-test.js";',
+        "const marker=`react.transitional.element`,React={},jsx=()=>null;",
+        "export{React as n,jsx as t};",
+      ].join(""),
+    );
+    fs.writeFileSync(path.join(assetsDir, "vscode-api-test.js"), "const marker=`vscode://codex`;export{};");
+    fs.writeFileSync(
+      path.join(assetsDir, "general-settings-test.js"),
+      "const marker=`hotkey-window-hotkey-state`;export{};",
+    );
+    fs.writeFileSync(path.join(assetsDir, "toggle-test.js"), "export{};");
+    fs.writeFileSync(path.join(assetsDir, "settings-row-test.js"), "export{};");
+    fs.writeFileSync(path.join(assetsDir, "settings-content-layout-test.js"), "export{};");
+    fs.writeFileSync(path.join(assetsDir, "settings-group-test.js"), "export{};");
+    fs.writeFileSync(path.join(assetsDir, "settings-surface-test.js"), "export{};");
+    fs.writeFileSync(path.join(assetsDir, "keyboard-shortcuts-settings-test.js"), "export{};");
+    fs.writeFileSync(
+      path.join(assetsDir, "settings-sections-test.js"),
+      "var e=`general-settings`,t=function(e){return e}({}),n=[{slug:`general-settings`},{slug:`account`},{slug:`appearance`},{slug:`keyboard-shortcuts`}];export{n,t as r,e as t};",
+    );
+    fs.writeFileSync(
+      path.join(assetsDir, "settings-shared-test.js"),
+      [
+        'var c=i({"general-settings":{id:`settings.nav.general-settings`,defaultMessage:`General`,description:`Title for general settings section`},"keyboard-shortcuts":{id:`settings.nav.keyboard-shortcuts`,defaultMessage:`Keyboard shortcuts`,description:`Title for keyboard shortcuts settings section`}});',
+        "function m(e){let t=(0,u.c)(19),{slug:n}=e;switch(n){case`general-settings`:{let e;return t[2]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`,description:`Title for general settings section`}),t[2]=e):e=t[2],e}case`keyboard-shortcuts`:{return null}}}",
+      ].join(""),
+    );
+    fs.writeFileSync(
+      path.join(assetsDir, "app-main-test.js"),
+      "var pE={\"general-settings\":(0,Q.lazy)(()=>pr(()=>import(`./general-settings-test.js`),[],import.meta.url)),\"keyboard-shortcuts\":(0,Q.lazy)(()=>pr(()=>import(`./keyboard-shortcuts-settings-test.js`),[],import.meta.url)),appearance:null};",
+    );
+    fs.writeFileSync(
+      path.join(assetsDir, "settings-page-test.js"),
+      [
+        "var me={\"general-settings\":K,\"keyboard-shortcuts\":pe,appearance:ce,agent:te,\"git-settings\":B,account:ne,\"data-controls\":G,personalization:U,usage:ee,\"browser-use\":fe,\"computer-use\":oe,\"local-environments\":J,worktrees:W,environments:J,\"mcp-settings\":q,\"hooks-settings\":se,connections:H,\"plugins-settings\":t,\"skills-settings\":V};",
+        "he=[`general-settings`,`account`,`appearance`,`agent`,`personalization`,`keyboard-shortcuts`,`mcp-settings`,`hooks-settings`,`connections`,`git-settings`,`local-environments`,`worktrees`,`browser-use`,`computer-use`,`data-controls`];",
+        "ge=[{key:`app`,heading:$.appHeading,slugs:[`general-settings`,`account`,`appearance`,`connections`,`git-settings`,`usage`]},{key:`connection`,heading:$.hostHeading,slugs:[`agent`,`personalization`,`keyboard-shortcuts`,`mcp-settings`,`hooks-settings`,`browser-use`,`computer-use`,`local-environments`,`worktrees`,`data-controls`]}];",
+        "e=e=>{switch(e.slug){case`plugins-settings`:return!1;case`skills-settings`:return!1;case`connections`:return u&&!l;case`usage`:return k;case`computer-use`:return P;case`browser-use`:return F;case`appearance`:case`git-settings`:case`worktrees`:case`local-environments`:case`data-controls`:case`environments`:return!0;case`account`:return!1;case`general-settings`:case`agent`:case`personalization`:return!0;case`hooks-settings`:return v.enabled;case`mcp-settings`:return!0;case`keyboard-shortcuts`:return g}};",
+        "if(V)bb0:switch(B.slug){case`usage`:H=A;break bb0;case`appearance`:case`general-settings`:case`agent`:case`git-settings`:case`account`:case`data-controls`:case`personalization`:H=!1;break bb0;case`keyboard-shortcuts`:H=y;break bb0;case`computer-use`:H=M.isLoading||h.isLoading;break bb0;case`browser-use`:H=a&&(f.isLoading||y);break bb0;case`local-environments`:case`worktrees`:case`environments`:case`mcp-settings`:case`connections`:case`plugins-settings`:case`skills-settings`:H=!1;break bb0;case`hooks-settings`:H=v.isLoading}",
+      ].join(""),
+    );
+
+    const result = patchKeybindsSettingsAssets(tempRoot);
+
+    assert.equal(result.matched, true);
+    assert.equal(result.reason, "using upstream keyboard shortcuts settings");
+    assert.ok(result.changed >= 1);
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(assetsDir, "settings-sections-test.js"), "utf8"),
+      /slug:`keybinds`/,
+    );
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(assetsDir, "settings-shared-test.js"), "utf8"),
+      /settings\.nav\.keybinds/,
+    );
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(assetsDir, "app-main-test.js"), "utf8"),
+      /keybinds-settings-linux/,
+    );
+    const settingsPageSource = fs.readFileSync(path.join(assetsDir, "settings-page-test.js"), "utf8");
+    assert.match(settingsPageSource, /case`keyboard-shortcuts`:return!0/);
+    assert.match(settingsPageSource, /case`keyboard-shortcuts`:H=!1;break bb0/);
+    assert.doesNotMatch(settingsPageSource, /keybinds/);
+    assert.equal(fs.existsSync(path.join(assetsDir, "keybinds-settings-linux.js")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("disables the upstream app sunset gate in the Linux wrapper webview", () => {

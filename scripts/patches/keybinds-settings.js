@@ -201,6 +201,68 @@ function collectRequiredAssetPatches(extractedDir, filenamePattern, patchFn, des
   });
 }
 
+function collectKeybindsRouteAssetPatches(extractedDir) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    throw new Error(`Required Keybinds settings patch failed: missing webview assets directory ${webviewAssetsDir}`);
+  }
+
+  const candidates = fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => /^(?:app-main|index)-.*\.js$/.test(name))
+    .sort();
+  if (candidates.length === 0) {
+    throw new Error("Required Keybinds settings patch failed: could not find webview app route bundle");
+  }
+
+  const patches = [];
+  for (const candidate of candidates) {
+    const filePath = path.join(webviewAssetsDir, candidate);
+    const currentSource = fs.readFileSync(filePath, "utf8");
+    try {
+      const patchedSource = applyKeybindsSettingsIndexPatch(currentSource);
+      if (patchedSource !== currentSource || currentSource.includes(keybindsSettingsAsset)) {
+        patches.push({ filePath, currentSource, patchedSource });
+      }
+    } catch (error) {
+      if (currentSource.includes('"general-settings":')) {
+        throw error;
+      }
+    }
+  }
+
+  if (patches.length === 0) {
+    throw new Error("Required Keybinds settings patch failed: could not find webview app route bundle");
+  }
+
+  return patches;
+}
+
+function collectKeybindsSettingsPageAssetPatches(extractedDir) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    throw new Error(`Required Keybinds settings patch failed: missing webview assets directory ${webviewAssetsDir}`);
+  }
+
+  const candidates = fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => /^settings-page-.*\.js$/.test(name))
+    .sort();
+  if (candidates.length === 0) {
+    throw new Error("Required Keybinds settings patch failed: could not find settings page bundle");
+  }
+
+  return candidates.map((candidate) => {
+    const filePath = path.join(webviewAssetsDir, candidate);
+    const currentSource = fs.readFileSync(filePath, "utf8");
+    return {
+      filePath,
+      currentSource,
+      patchedSource: applyKeybindsSettingsPagePatch(currentSource),
+    };
+  });
+}
+
 function hasNativeKeyboardShortcutsSettings(extractedDir) {
   const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
   if (!fs.existsSync(webviewAssetsDir)) {
@@ -220,13 +282,57 @@ function hasNativeKeyboardShortcutsSettings(extractedDir) {
     .some((name) => /^keyboard-shortcuts-settings-.*\.js$/.test(name));
 }
 
+function patchNativeKeyboardShortcutsSettingsAssets(extractedDir) {
+  try {
+    const patches = [
+      ...collectRequiredAssetPatches(
+        extractedDir,
+        /^settings-page-.*\.js$/,
+        applyNativeKeyboardShortcutsSettingsPagePatch,
+        "settings page bundle",
+      ),
+      ...collectNativeKeyboardShortcutsRouteCleanupPatches(extractedDir),
+    ];
+
+    let changed = 0;
+    for (const patch of patches) {
+      if (patch.patchedSource !== patch.currentSource) {
+        fs.writeFileSync(patch.filePath, patch.patchedSource, "utf8");
+        changed += 1;
+      }
+    }
+    return { matched: true, changed, reason: "using upstream keyboard shortcuts settings" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`WARN: Native Keyboard Shortcuts patch skipped: ${message}`);
+    return { matched: false, changed: 0, reason: message };
+  }
+}
+
+function collectNativeKeyboardShortcutsRouteCleanupPatches(extractedDir) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    throw new Error(`Required Keybinds settings patch failed: missing webview assets directory ${webviewAssetsDir}`);
+  }
+
+  return fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => /^(?:app-main|index)-.*\.js$/.test(name))
+    .sort()
+    .map((candidate) => {
+      const filePath = path.join(webviewAssetsDir, candidate);
+      const currentSource = fs.readFileSync(filePath, "utf8");
+      return {
+        filePath,
+        currentSource,
+        patchedSource: applyNativeKeyboardShortcutsRouteCleanupPatch(currentSource),
+      };
+    });
+}
+
 function patchKeybindsSettingsAssets(extractedDir) {
   if (hasNativeKeyboardShortcutsSettings(extractedDir)) {
-    return {
-      matched: true,
-      changed: 0,
-      reason: "upstream keyboard shortcuts settings are present",
-    };
+    return patchNativeKeyboardShortcutsSettingsAssets(extractedDir);
   }
 
   try {
@@ -248,12 +354,8 @@ function patchKeybindsSettingsAssets(extractedDir) {
         applyKeybindsSettingsSharedPatch,
         "settings shared bundle",
       ),
-      ...collectRequiredAssetPatches(
-        extractedDir,
-        /^index-.*\.js$/,
-        applyKeybindsSettingsIndexPatch,
-        "webview index bundle",
-      ),
+      ...collectKeybindsRouteAssetPatches(extractedDir),
+      ...collectKeybindsSettingsPageAssetPatches(extractedDir),
     ];
 
     fs.writeFileSync(keybindsAsset.filePath, keybindsAsset.source, "utf8");
@@ -277,6 +379,11 @@ function applyKeybindsSettingsSectionsPatch(currentSource) {
 
   if (patchedSource.includes("slug:`keybinds`")) {
     return patchedSource;
+  }
+
+  const firstSectionPattern = /(n=\[\{slug:(?:e|`general-settings`)\},)(?!\{slug:`keybinds`\})/;
+  if (firstSectionPattern.test(patchedSource)) {
+    return patchedSource.replace(firstSectionPattern, "$1{slug:`keybinds`},");
   }
 
   const sectionsNeedle = "var e=`general-settings`,t=`mcp-settings`,n=[{slug:e},";
@@ -313,17 +420,124 @@ function applyKeybindsSettingsSharedPatch(currentSource) {
   }
 
   if (!patchedSource.includes("settings.section.keybinds")) {
-    const sectionNeedle =
-      "case`general-settings`:{let e;return t[2]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`,description:`Title for general settings section`}),t[2]=e):e=t[2],e}";
-    const sectionPatch =
-      "case`general-settings`:{let e;return t[2]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`,description:`Title for general settings section`}),t[2]=e):e=t[2],e}case`keybinds`:{return (0,d.jsx)(n,{id:`settings.section.keybinds`,defaultMessage:`Keybinds`,description:`Title for keybinds settings section`})}";
-    if (!patchedSource.includes(sectionNeedle)) {
+    const sectionTitleMatch = patchedSource.match(
+      /case`general-settings`:\{(?:(?!case`).)*?\(0,([A-Za-z_$][\w$]*)\.jsx\)\(([A-Za-z_$][\w$]*),\{id:`settings\.section\.general-settings`/s,
+    );
+    const sectionInsertPattern = /(case`general-settings`:\{(?:(?!case`).)*?)(case`)/s;
+    if (!sectionTitleMatch || !sectionInsertPattern.test(patchedSource)) {
       throw new Error("Required Keybinds settings patch failed: could not add keybinds section title");
     }
-    patchedSource = patchedSource.replace(sectionNeedle, sectionPatch);
+    const [, jsxAlias, messageAlias] = sectionTitleMatch;
+    patchedSource = patchedSource.replace(
+      sectionInsertPattern,
+      `$1case\`keybinds\`:{return (0,${jsxAlias}.jsx)(${messageAlias},{id:\`settings.section.keybinds\`,defaultMessage:\`Keybinds\`,description:\`Title for keybinds settings section\`})}$2`,
+    );
   }
 
   return patchedSource;
+}
+
+function applyKeybindsSettingsPagePatch(currentSource) {
+  let patchedSource = currentSource;
+
+  if (!/(?:^|[,{])keybinds:/.test(patchedSource)) {
+    const iconPattern =
+      /([A-Za-z_$][\w$]*=\{)"general-settings":([A-Za-z_$][\w$]*),"keyboard-shortcuts":([A-Za-z_$][\w$]*),/;
+    if (!iconPattern.test(patchedSource)) {
+      throw new Error("Required Keybinds settings patch failed: could not add keybinds navigation icon");
+    }
+    patchedSource = patchedSource.replace(
+      iconPattern,
+      (_match, prefix, generalIcon, shortcutIcon) =>
+        `${prefix}keybinds:${shortcutIcon},"general-settings":${generalIcon},"keyboard-shortcuts":${shortcutIcon},`,
+    );
+  }
+
+  if (!/=\[`general-settings`,`keybinds`/.test(patchedSource)) {
+    const orderPattern = /([A-Za-z_$][\w$]*=\[`general-settings`,)(`(?:account|appearance)`)/;
+    if (!orderPattern.test(patchedSource)) {
+      throw new Error("Required Keybinds settings patch failed: could not add keybinds navigation order");
+    }
+    patchedSource = patchedSource.replace(orderPattern, "$1`keybinds`,$2");
+  }
+
+  if (!patchedSource.includes("slugs:[`general-settings`,`keybinds`")) {
+    const groupedPattern = /(slugs:\[`general-settings`,)(`(?:account|appearance)`)/;
+    if (!groupedPattern.test(patchedSource)) {
+      throw new Error("Required Keybinds settings patch failed: could not add keybinds navigation group");
+    }
+    patchedSource = patchedSource.replace(groupedPattern, "$1`keybinds`,$2");
+  }
+
+  if (!patchedSource.includes("case`keybinds`:case`general-settings`")) {
+    const visibilityNeedle = "case`general-settings`:case`agent`:case`personalization`:return!0;";
+    if (!patchedSource.includes(visibilityNeedle)) {
+      throw new Error("Required Keybinds settings patch failed: could not add keybinds visibility");
+    }
+    patchedSource = patchedSource.replace(visibilityNeedle, `case\`keybinds\`:${visibilityNeedle}`);
+  }
+
+  if (!/case`keybinds`:case`appearance`:case`general-settings`/.test(patchedSource)) {
+    const redirectPattern =
+      /(case`appearance`:case`general-settings`:case`agent`:case`git-settings`:case`account`:case`data-controls`:case`personalization`:[A-Za-z_$][\w$]*=!1;break [A-Za-z_$][\w$]*;)/;
+    if (!redirectPattern.test(patchedSource)) {
+      throw new Error("Required Keybinds settings patch failed: could not add keybinds redirect fallback");
+    }
+    patchedSource = patchedSource.replace(redirectPattern, "case`keybinds`:$1");
+  }
+
+  return patchedSource;
+}
+
+function applyNativeKeyboardShortcutsSettingsPagePatch(currentSource) {
+  let patchedSource = currentSource;
+
+  if (!patchedSource.includes("`keyboard-shortcuts`")) {
+    throw new Error("Required Keyboard Shortcuts patch failed: settings page has no keyboard-shortcuts section");
+  }
+
+  patchedSource = patchedSource
+    .replace(/keybinds:[A-Za-z_$][\w$]*,"general-settings":/g, '"general-settings":')
+    .replace(/=\[`general-settings`,`keybinds`,/g, "=[`general-settings`,")
+    .replace(/slugs:\[`general-settings`,`keybinds`,/g, "slugs:[`general-settings`,")
+    .replace(/case`keybinds`:case`general-settings`/g, "case`general-settings`")
+    .replace(/case`keybinds`:case`appearance`/g, "case`appearance`");
+
+  const visibilityPattern = /case`keyboard-shortcuts`:return\s*[A-Za-z_$][\w$]*/;
+  if (!visibilityPattern.test(patchedSource)) {
+    throw new Error("Required Keyboard Shortcuts patch failed: could not make keyboard shortcuts visible");
+  }
+  patchedSource = patchedSource.replace(visibilityPattern, "case`keyboard-shortcuts`:return!0");
+
+  const redirectPattern = /case`keyboard-shortcuts`:\s*([A-Za-z_$][\w$]*)=[^;]+;break\s+([A-Za-z_$][\w$]*);/;
+  if (redirectPattern.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      redirectPattern,
+      (_match, loadingVar, label) => `case\`keyboard-shortcuts\`:${loadingVar}=!1;break ${label};`,
+    );
+  }
+
+  return patchedSource;
+}
+
+function applyNativeKeyboardShortcutsRouteCleanupPatch(currentSource) {
+  let patchedSource = removeLinuxKeybindOverridesRuntimePatch(currentSource);
+
+  const routePattern =
+    /(var [A-Za-z_$][\w$]*=\{)keybinds:\(0,[A-Za-z_$][\w$]*\.lazy\)\(\(\)=>[A-Za-z_$][\w$]*\(\(\)=>import\(`\.\/keybinds-settings-linux\.js`\),\[\],import\.meta\.url\)\),"general-settings":/;
+  patchedSource = patchedSource.replace(routePattern, '$1"general-settings":');
+
+  return patchedSource;
+}
+
+function removeLinuxKeybindOverridesRuntimePatch(currentSource) {
+  const runtimeMarker = ";function codexLinuxKeybindOverridesRuntime()";
+  const existingRuntimeIndex = currentSource.indexOf(runtimeMarker);
+  if (existingRuntimeIndex === -1) {
+    return currentSource;
+  }
+
+  return currentSource.slice(0, existingRuntimeIndex).trimEnd();
 }
 
 function applyLinuxKeybindOverridesRuntimePatch(currentSource) {
@@ -342,42 +556,41 @@ function applyKeybindsSettingsIndexPatch(currentSource) {
   let patchedSource = currentSource;
 
   if (!patchedSource.includes(`${keybindsSettingsAsset}`)) {
-    const routePattern = /var ([A-Za-z_$][\w$]*)=\{"general-settings":(?=\(0,[A-Za-z_$][\w$]*\.lazy\))/;
+    const routePattern =
+      /var ([A-Za-z_$][\w$]*)=\{"general-settings":(?=\(0,([A-Za-z_$][\w$]*)\.lazy\)\(\(\)=>([A-Za-z_$][\w$]*)\(\(\)=>import\(`)/;
     if (!routePattern.test(patchedSource)) {
       throw new Error("Required Keybinds settings patch failed: could not add keybinds route");
     }
     patchedSource = patchedSource.replace(
       routePattern,
-      `var $1={keybinds:(0,Z.lazy)(()=>s(()=>import(\`./${keybindsSettingsAsset}\`),[],import.meta.url)),"general-settings":`,
+      (_match, routeObjectName, lazyAlias, preloadAlias) =>
+        `var ${routeObjectName}={keybinds:(0,${lazyAlias}.lazy)(()=>${preloadAlias}(()=>import(\`./${keybindsSettingsAsset}\`),[],import.meta.url)),"general-settings":`,
     );
   }
 
   if (!/[,{]keybinds:[A-Za-z_$][\w$]*,"general-settings":/.test(patchedSource)) {
     const iconPattern = /([A-Za-z_$][\w$]*=\{)"general-settings":([A-Za-z_$][\w$]*),/;
-    if (!iconPattern.test(patchedSource)) {
-      throw new Error("Required Keybinds settings patch failed: could not add keybinds icon");
+    if (iconPattern.test(patchedSource)) {
+      patchedSource = patchedSource.replace(
+        iconPattern,
+        (_match, prefix, icon) => `${prefix}keybinds:${icon},"general-settings":${icon},`,
+      );
     }
-    patchedSource = patchedSource.replace(
-      iconPattern,
-      (_match, prefix, icon) => `${prefix}keybinds:${icon},"general-settings":${icon},`,
-    );
   }
 
   if (!/=\[`general-settings`,`keybinds`/.test(patchedSource)) {
     const orderPattern = /([A-Za-z_$][\w$]*=\[`general-settings`,)`appearance`/;
-    if (!orderPattern.test(patchedSource)) {
-      throw new Error("Required Keybinds settings patch failed: could not add keybinds nav order");
+    if (orderPattern.test(patchedSource)) {
+      patchedSource = patchedSource.replace(orderPattern, "$1`keybinds`,`appearance`");
     }
-    patchedSource = patchedSource.replace(orderPattern, "$1`keybinds`,`appearance`");
   }
 
   if (!patchedSource.includes("slugs:[`general-settings`,`keybinds`")) {
     const groupNeedle = "slugs:[`general-settings`,`appearance`,`connections`,`git-settings`,`usage`]";
     const groupPatch = "slugs:[`general-settings`,`keybinds`,`appearance`,`connections`,`git-settings`,`usage`]";
-    if (!patchedSource.includes(groupNeedle)) {
-      throw new Error("Required Keybinds settings patch failed: could not add keybinds nav group");
+    if (patchedSource.includes(groupNeedle)) {
+      patchedSource = patchedSource.replace(groupNeedle, groupPatch);
     }
-    patchedSource = patchedSource.replace(groupNeedle, groupPatch);
   }
 
   if (!patchedSource.includes("case`keybinds`:return l===`electron`")) {
@@ -385,10 +598,9 @@ function applyKeybindsSettingsIndexPatch(currentSource) {
       "case`appearance`:case`git-settings`:case`worktrees`:case`local-environments`:case`data-controls`:case`environments`:return l===`electron`;";
     const visibilityPatch =
       "case`keybinds`:return l===`electron`;case`appearance`:case`git-settings`:case`worktrees`:case`local-environments`:case`data-controls`:case`environments`:return l===`electron`;";
-    if (!patchedSource.includes(visibilityNeedle)) {
-      throw new Error("Required Keybinds settings patch failed: could not add keybinds visibility");
+    if (patchedSource.includes(visibilityNeedle)) {
+      patchedSource = patchedSource.replace(visibilityNeedle, visibilityPatch);
     }
-    patchedSource = patchedSource.replace(visibilityNeedle, visibilityPatch);
   }
 
   if (!patchedSource.includes("case`keybinds`:k=!1;break bb0;")) {
@@ -406,6 +618,9 @@ function applyKeybindsSettingsIndexPatch(currentSource) {
 
 module.exports = {
   applyKeybindsSettingsIndexPatch,
+  applyKeybindsSettingsPagePatch,
+  applyNativeKeyboardShortcutsRouteCleanupPatch,
+  applyNativeKeyboardShortcutsSettingsPagePatch,
   applyKeybindsSettingsSectionsPatch,
   applyKeybindsSettingsSharedPatch,
   applyLinuxKeybindOverridesRuntimePatch,
