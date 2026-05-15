@@ -118,12 +118,12 @@ repo_default_branch() {
         return 0
     fi
 
-    if branch="$(repo_branch_from_origin_head "$SOURCE_REPO_DIR" 2>/dev/null)"; then
+    if branch="$(repo_branch_from_origin_head "$SOURCE_REPO_DIR" 2>/dev/null)" && remote_branch_exists "$branch"; then
         printf '%s\n' "$branch"
         return 0
     fi
 
-    if branch="$(repo_branch_from_origin_head "$MANAGED_REPO_DIR" 2>/dev/null)"; then
+    if branch="$(repo_branch_from_origin_head "$MANAGED_REPO_DIR" 2>/dev/null)" && remote_branch_exists "$branch"; then
         printf '%s\n' "$branch"
         return 0
     fi

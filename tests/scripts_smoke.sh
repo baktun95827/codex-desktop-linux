@@ -2801,6 +2801,57 @@ EOF
     )
 }
 
+test_user_local_prepare_build_repo_ignores_stale_source_origin_head() {
+    info "Checking user-local managed checkout ignores a stale source origin/HEAD ref"
+    local workspace="$TMP_DIR/user-local-stale-origin-head"
+    local origin_repo="$workspace/origin.git"
+    local source_repo="$workspace/source"
+    local managed_repo="$workspace/xdg-data/codex-desktop-linux/managed-repo"
+    local install_env="$workspace/install.env"
+
+    mkdir -p "$workspace"
+    git init --bare --initial-branch=main "$origin_repo" >/dev/null
+    git clone "$origin_repo" "$source_repo" >/dev/null 2>&1
+    git -C "$source_repo" config user.name "Smoke Test"
+    git -C "$source_repo" config user.email "smoke@example.com"
+    cat > "$source_repo/branch.txt" <<'EOF'
+main-branch
+EOF
+    git -C "$source_repo" add branch.txt
+    git -C "$source_repo" commit -m "base" >/dev/null
+    git -C "$source_repo" push -u origin main >/dev/null
+    git -C "$source_repo" remote set-head origin -a >/dev/null 2>&1 || true
+    git -C "$source_repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
+
+    (
+        export HOME="$workspace/home"
+        export XDG_DATA_HOME="$workspace/xdg-data"
+        export XDG_STATE_HOME="$workspace/xdg-state"
+        mkdir -p "$HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
+
+        # shellcheck disable=SC1091
+        source "$REPO_DIR/contrib/user-local-install/files/.local/lib/codex-desktop-linux/common.sh"
+
+        INSTALL_CONFIG_FILE="$install_env"
+        cat > "$INSTALL_CONFIG_FILE" <<EOF
+SOURCE_REPO_DIR=$(printf '%q' "$source_repo")
+MANAGED_REPO_DIR=$(printf '%q' "$managed_repo")
+REPO_ORIGIN_URL=$(printf '%q' "$origin_repo")
+REPO_DEFAULT_BRANCH=$(printf '%q' "")
+OPT_ROOT=$(printf '%q' "$workspace/opt")
+EOF
+
+        prepare_build_repo
+
+        [ "$(repo_default_branch)" = "main" ] \
+            || fail "Expected stale source origin/HEAD to fall back to the real remote default branch"
+        [ "$(git -C "$MANAGED_REPO_DIR" rev-parse --abbrev-ref HEAD)" = "main" ] \
+            || fail "Expected managed checkout to land on the recovered main branch"
+        [ "$(cat "$MANAGED_REPO_DIR/branch.txt")" = "main-branch" ] \
+            || fail "Expected managed checkout contents from the recovered main branch"
+    )
+}
+
 test_user_local_prepare_build_repo_handles_deleted_overlay_paths() {
     info "Checking user-local managed checkout tolerates overlay paths deleted in the worktree"
     local workspace="$TMP_DIR/user-local-deleted-overlay"
@@ -2946,6 +2997,7 @@ main() {
     test_user_local_prepare_build_repo_overlays_committed_local_changes
     test_user_local_prepare_build_repo_detects_default_branch_without_recorded_branch
     test_user_local_prepare_build_repo_ignores_stale_recorded_default_branch
+    test_user_local_prepare_build_repo_ignores_stale_source_origin_head
     test_user_local_prepare_build_repo_handles_deleted_overlay_paths
     test_user_local_prepare_build_repo_removes_rename_source_paths
     info "All script smoke tests passed"
