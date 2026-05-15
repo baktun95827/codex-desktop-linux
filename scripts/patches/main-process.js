@@ -145,6 +145,29 @@ function applyLinuxOpaqueBackgroundPatch(currentSource) {
   }
 
   const [, transparentVar, darkVar, lightVar] = colorMatch;
+
+  const currentFuncParamRegex =
+    /function\s+[A-Za-z_$][\w$]*\(\{platform:([A-Za-z_$][\w$]*),appearance:([A-Za-z_$][\w$]*),opaqueWindowsEnabled:([A-Za-z_$][\w$]*),prefersDarkColors:([A-Za-z_$][\w$]*)\}\)\{return\s*\3&&!([A-Za-z_$][\w$]*)\(\2\)&&\(\1===`darwin`\|\|\1===`win32`\)\?/;
+  const currentFuncMatch = currentSource.match(currentFuncParamRegex);
+  if (currentFuncMatch != null) {
+    const [, platformParam, appearanceParam, , darkColorsParam, transparentAppearancePredicate] =
+      currentFuncMatch;
+    const win32Needle =
+      `:${platformParam}===\`win32\`&&!${transparentAppearancePredicate}(${appearanceParam})?`;
+    const linuxBgPrefix =
+      `:${platformParam}===\`linux\`&&!${transparentAppearancePredicate}(${appearanceParam})?{backgroundColor:${darkColorsParam}?${darkVar}:${lightVar},backgroundMaterial:null}:`;
+
+    if (currentSource.includes(linuxBgPrefix)) {
+      return currentSource;
+    }
+    if (currentSource.includes(win32Needle)) {
+      return currentSource.replace(win32Needle, `${linuxBgPrefix}${win32Needle.slice(1)}`);
+    }
+
+    console.warn("WARN: Could not find BrowserWindow background color needle — skipping background patch");
+    return currentSource;
+  }
+
   const funcParamRegex =
     /function\s+[A-Za-z_$][\w$]*\(\{platform:([A-Za-z_$][\w$]*),appearance:([A-Za-z_$][\w$]*),opaqueWindowsEnabled:[A-Za-z_$][\w$]*,prefersDarkColors:([A-Za-z_$][\w$]*)\}\)\{return\s*\1===`win32`&&!([A-Za-z_$][\w$]*)\(\2\)/;
   const funcMatch = currentSource.match(funcParamRegex);
@@ -339,9 +362,13 @@ function applyLinuxExplicitTrayQuitPatch(currentSource) {
   const trayQuitNeedle = "{label:rB(this.appName),click:()=>{n.app.quit()}}";
   const trayQuitPatch =
     `{label:rB(this.appName),click:()=>{${quitMarkerExpression}n.app.quit()}}`;
+  const patchedTrayQuitRegex =
+    /\{label:[^{}]+,click:\(\)=>\{typeof codexLinuxPrepareForExplicitQuit===`function`\?codexLinuxPrepareForExplicitQuit\(\):typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),[A-Za-z_$][\w$]*\.app\.quit\(\)\}\}/;
   const trayQuitRegex =
     /\{label:rB\(([^)]+)\),click:\(\)=>\{([A-Za-z_$][\w$]*)\.app\.quit\(\)\}\}/;
-  if (patchedSource.includes(trayQuitPatch)) {
+  const genericTrayQuitRegex =
+    /\{label:([A-Za-z_$][\w$]*\(this\.appName\)),click:\(\)=>\{([A-Za-z_$][\w$]*)\.app\.quit\(\)\}\}/;
+  if (patchedSource.includes(trayQuitPatch) || patchedTrayQuitRegex.test(patchedSource)) {
     // Already patched.
   } else if (patchedSource.includes(trayQuitNeedle)) {
     patchedSource = patchedSource.replace(trayQuitNeedle, trayQuitPatch);
@@ -350,6 +377,12 @@ function applyLinuxExplicitTrayQuitPatch(currentSource) {
       trayQuitRegex,
       (_match, appNameExpr, electronVar) =>
         `{label:rB(${appNameExpr}),click:()=>{${quitMarkerExpression}${electronVar}.app.quit()}}`,
+    );
+  } else if (genericTrayQuitRegex.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      genericTrayQuitRegex,
+      (_match, labelExpression, electronVar) =>
+        `{label:${labelExpression},click:()=>{${quitMarkerExpression}${electronVar}.app.quit()}}`,
     );
   } else if (
     patchedSource.includes("getNativeTrayMenuItems(){") &&
